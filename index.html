@@ -153,7 +153,6 @@
   .toast.show{opacity:1;transform:translateY(0)}
   .toast.error{border-color:rgba(255,107,122,0.4)}
   .toast.success{border-color:rgba(74,222,128,0.4)}
-
   /* Import log footer */
   #importLog{flex-shrink:0;border-top:1px solid var(--border);background:var(--surface);padding:5px 24px;display:flex;align-items:flex-start;gap:10px;min-height:28px}
   #importLog.log-empty{display:none}
@@ -182,7 +181,7 @@
         </svg>
       </div>
       <h1 class="login-title">Attendance Tracker</h1>
-      <p class="login-sub">USQnue &mdash; Sign in to access the tracker</p>
+      <p class="login-sub">USQ &mdash; Sign in to access the tracker</p>
       <div class="input-group">
         <label>Email</label>
         <input type="email" id="emailInput" placeholder="you@example.com" autocomplete="email">
@@ -211,7 +210,7 @@
       <div class="key-item"><div class="key-swatch" style="background:#f59e0b"></div> Final</div>
       <div class="key-item"><div class="key-swatch" style="background:#ef4444"></div> Terminated</div>
       <div class="key-sep"></div>
-      <div class="key-item"><span style="color:#facc15;font-size:0.85rem">★</span> Has note</div>
+      <div class="key-item"><span style="color:#facc15;font-size:0.85rem">&#9733;</span> Has note</div>
     </div>
   </div>
   <div class="toolbar">
@@ -283,7 +282,7 @@
     </div>
     <div style="margin-top:16px">
       <div class="note-label-row">
-        <div class="note-label"><span class="star-ico">★</span> Note</div>
+        <div class="note-label"><span class="star-ico">&#9733;</span> Note</div>
         <button class="btn" id="clearNoteBtn" onclick="clearUserNote()" style="font-size:0.68rem;padding:3px 8px">Clear note</button>
       </div>
       <textarea id="userNoteInput" class="note-input" placeholder="Add a note about this day (optional)"></textarea>
@@ -332,52 +331,69 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const dataRef = firebase.database().ref('attendance_usq');
+const importLogRef = firebase.database().ref('importLog');
 
-// ── Import Log (session-only) ──────────────────────────────────────────────
-let sessionImportLog = [];
+let currentUserEmail = '';
+let importLogEntries = []; // sorted newest first
 
-function getDateRangeFromImport(parsed) {
-  const allDs = [];
-  Object.values(parsed).forEach(p => { Object.keys(p.dates || {}).forEach(d => allDs.push(d)); });
-  if (!allDs.length) return null;
-  allDs.sort();
-  const fmt = ds => { try { const d = new Date(ds + 'T00:00:00'); return (d.getMonth()+1) + '/' + d.getDate(); } catch(e) { return ds; } };
-  const first = allDs[0], last = allDs[allDs.length - 1];
-  return first === last ? fmt(first) : fmt(first) + ' – ' + fmt(last);
+// ── Import Log (Firebase-persisted, once() to avoid duplicate fires) ─────────
+function loadImportLog() {
+  importLogRef.once('value', snap => {
+    const data = snap.val();
+    if (!data) { importLogEntries = []; renderImportLog(); return; }
+    importLogEntries = Object.entries(data)
+      .map(([id, entry]) => ({ id, ...entry }))
+      .filter(e => e && e.ts && e.who && e.who !== 'undefined' && e.who !== 'unknown')
+      .sort((a, b) => b.ts - a.ts);
+    renderImportLog();
+  });
 }
 
-function addImportLogEntry(parsed, personCount, incidentCount) {
-  const user = auth.currentUser;
-  const who = user ? (user.email || '').split('@')[0] : 'unknown';
+function logImport(count, dateRange) {
   const now = new Date();
-  const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const dateStr = (now.getMonth()+1) + '/' + now.getDate();
-  const dateRange = getDateRangeFromImport(parsed);
-  sessionImportLog.push({ who, dateStr, timeStr, personCount, incidentCount, dateRange });
-  renderImportLog();
+  const mo = now.getMonth() + 1, dy = now.getDate(), yr = String(now.getFullYear()).slice(2);
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const who = (currentUserEmail || '').split('@')[0] || '';
+  if (!who) return;
+  const entry = {
+    who,
+    count: count || 0,
+    dateRange: dateRange || '',
+    label: `${mo}/${dy}/${yr} ${timeStr}`,
+    ts: Date.now()
+  };
+  importLogRef.push(entry)
+    .then(() => loadImportLog())
+    .catch(err => console.error('Import log save failed:', err));
 }
 
 function renderImportLog() {
   const logEl = document.getElementById('importLog');
   const entriesEl = document.getElementById('importLogEntries');
-  if (!sessionImportLog.length) { logEl.classList.add('log-empty'); return; }
+  if (!importLogEntries.length) { logEl.classList.add('log-empty'); return; }
   logEl.classList.remove('log-empty');
-  entriesEl.innerHTML = sessionImportLog.map((e, i) => `
-    <div class="import-log-entry">
-      <span class="log-num">${i + 1}.</span>
+  entriesEl.innerHTML = importLogEntries.map((e, i) => {
+    const num = importLogEntries.length - i;
+    const rangeHtml = (e.dateRange && e.dateRange !== 'undefined')
+      ? `<span class="log-sep">&#183;</span><span style="color:var(--text-dim)">${e.dateRange}</span>`
+      : '';
+    const label = (e.label && e.label !== 'undefined') ? e.label : '';
+    return `<div class="import-log-entry">
+      <span class="log-num">${num}.</span>
       <span class="log-who">${e.who}</span>
-      <span class="log-sep">·</span>
-      <span>${e.dateStr} at ${e.timeStr}</span>
-      ${e.dateRange ? `<span class="log-sep">·</span><span style="color:var(--text-dim)">${e.dateRange}</span>` : ''}
-      <span class="log-sep">·</span>
-      <span>${e.personCount} budtenders, ${e.incidentCount} incidents</span>
-      <button class="log-del" onclick="removeImportLogEntry(${i})" title="Remove">✕</button>
-    </div>
-  `).join('');
+      <span class="log-sep">&#183;</span>
+      <span>${e.count} budtenders</span>
+      ${rangeHtml}
+      ${label ? `<span class="log-sep">&#183;</span><span>${label}</span>` : ''}
+      <button class="log-del" onclick="deleteImportLog('${e.id}')" title="Remove">&#x2715;</button>
+    </div>`;
+  }).join('');
 }
 
-function removeImportLogEntry(idx) {
-  sessionImportLog.splice(idx, 1);
+function deleteImportLog(id) {
+  if (!id) return;
+  importLogRef.child(id).remove().catch(err => console.error('Import log delete failed:', err));
+  importLogEntries = importLogEntries.filter(e => e.id !== id);
   renderImportLog();
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,8 +432,6 @@ function handleLock() {
     document.getElementById('appView').style.display = 'none';
     document.getElementById('passwordInput').value = '';
     document.getElementById('emailInput').value = '';
-    sessionImportLog = [];
-    renderImportLog();
     setTimeout(() => document.getElementById('emailInput').focus(), 100);
   });
 }
@@ -425,10 +439,14 @@ function showApp() {
   document.getElementById('loginView').style.display = 'none';
   document.getElementById('appView').style.display = 'flex';
   loadData();
+  loadImportLog();
 }
 auth.onAuthStateChanged(user => {
-  if (user) { showApp(); }
-  else {
+  if (user) {
+    currentUserEmail = user.email || '';
+    showApp();
+  } else {
+    currentUserEmail = '';
     document.getElementById('loginView').style.display = 'flex';
     document.getElementById('appView').style.display = 'none';
     setTimeout(() => document.getElementById('emailInput').focus(), 100);
@@ -452,10 +470,7 @@ function loadData() {
     rebuildDates(); renderTable();
     if (initialLoad) {
       initialLoad = false;
-      setTimeout(() => {
-        const wrap = document.getElementById('tableWrap');
-        wrap.scrollLeft = wrap.scrollWidth;
-      }, 50);
+      setTimeout(() => { const wrap = document.getElementById('tableWrap'); wrap.scrollLeft = wrap.scrollWidth; }, 50);
     }
   }, err => {
     console.warn('Firebase error, using localStorage:', err.message);
@@ -463,10 +478,7 @@ function loadData() {
     rebuildDates(); renderTable();
     if (initialLoad) {
       initialLoad = false;
-      setTimeout(() => {
-        const wrap = document.getElementById('tableWrap');
-        wrap.scrollLeft = wrap.scrollWidth;
-      }, 50);
+      setTimeout(() => { const wrap = document.getElementById('tableWrap'); wrap.scrollLeft = wrap.scrollWidth; }, 50);
     }
   });
 }
@@ -707,12 +719,21 @@ function showPreview(parsed) {
 function confirmImport() {
   if (!pendingImport) return;
   const snapshot = pendingImport;
-  const names = Object.keys(snapshot);
-  let totalIncidents = 0;
-  names.forEach(n => totalIncidents += Object.keys(snapshot[n].dates || {}).length);
+  const count = Object.keys(snapshot).length;
 
-  names.forEach(k => {
-    const v = snapshot[k];
+  // Extract date range before anything clears pendingImport
+  const allImportDates = [];
+  Object.values(snapshot).forEach(p => { if (p.dates) Object.keys(p.dates).forEach(d => allImportDates.push(d)); });
+  allImportDates.sort();
+  let dateRange = '';
+  if (allImportDates.length) {
+    const fmt = ds => { const d = new Date(ds + 'T00:00:00'); return (d.getMonth()+1) + '/' + d.getDate(); };
+    const first = fmt(allImportDates[0]);
+    const last = fmt(allImportDates[allImportDates.length - 1]);
+    dateRange = first === last ? first : first + ' - ' + last;
+  }
+
+  Object.entries(snapshot).forEach(([k,v]) => {
     if (!attendanceData[k]) attendanceData[k] = { displayName: v.displayName, dates: {}, notes: {} };
     if (!attendanceData[k].dates) attendanceData[k].dates = {};
     if (!attendanceData[k].notes) attendanceData[k].notes = {};
@@ -720,9 +741,9 @@ function confirmImport() {
     if (v.notes) Object.assign(attendanceData[k].notes, v.notes);
   });
 
-  addImportLogEntry(snapshot, names.length, totalIncidents);
   saveData(); rebuildDates(); renderTable(); closeImport();
-  toast(`Imported ${names.length} budtenders`, 'success');
+  logImport(count, dateRange);
+  toast('Imported ' + count + ' budtenders', 'success');
 }
 function rebuildDates() {
   const s = new Set();
@@ -756,15 +777,11 @@ function parseDate(dateStr) {
   const d=new Date(s); return isNaN(d)?null:d;
 }
 function getLast60Pts(dates) {
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const cutoff = new Date(today);
-  cutoff.setDate(cutoff.getDate() - 60);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 60);
   let pts = 0;
   Object.entries(dates).forEach(([d,v]) => {
-    const ed = parseDate(d);
-    if (!ed) return;
-    ed.setHours(0,0,0,0);
+    const ed = parseDate(d); if (!ed) return; ed.setHours(0,0,0,0);
     if (ed >= cutoff && ed <= today) pts += getPoints(v);
   });
   return pts;
@@ -804,8 +821,7 @@ function toggleShowHidden() {
 }
 function toggleHidePerson() {
   if (!editingPerson) return;
-  const p=attendanceData[editingPerson];
-  if (!p) return;
+  const p=attendanceData[editingPerson]; if (!p) return;
   const name=p.displayName||editingPerson;
   if (p.hidden) { p.hidden=false; toast(name+' is now visible','success'); }
   else { if (!confirm('Hide '+name+' from the tracker?')) return; p.hidden=true; toast(name+' hidden','success'); }
@@ -840,8 +856,7 @@ function getWeekKey(dateStr) {
 }
 function getMonthKey(dateStr) { return dateStr.substring(0,7); }
 function fmtWeek(weekKey) {
-  const d=new Date(weekKey+'T00:00:00'), end=new Date(d);
-  end.setDate(d.getDate()+6);
+  const d=new Date(weekKey+'T00:00:00'), end=new Date(d); end.setDate(d.getDate()+6);
   return (d.getMonth()+1)+'/'+d.getDate()+' - '+(end.getMonth()+1)+'/'+end.getDate();
 }
 function fmtMonth(monthKey) {
@@ -897,9 +912,9 @@ function renderTable() {
     const termed=isTerminated(dates), nc=getNameColor(dates,termed), wuTag=getWriteupTagHtml(dates);
     let cells;
     if (periodInfo) {
-      cells=filteredPeriods.map(p=>{ const pts=getPeriodPoints(dates,p,periodInfo.keyFn); const display=pts===0?'<span style="color:var(--text-muted)">·</span>':(pts%1===0?pts:pts.toFixed(1)); return `<td class="period-cell ${pts>0?ptsColor(pts):''}">${display}</td>`; }).join('');
+      cells=filteredPeriods.map(p=>{ const pts=getPeriodPoints(dates,p,periodInfo.keyFn); const display=pts===0?'<span style="color:var(--text-muted)">&#183;</span>':(pts%1===0?pts:pts.toFixed(1)); return `<td class="period-cell ${pts>0?ptsColor(pts):''}">${display}</td>`; }).join('');
     } else {
-      cells=filteredDates.map(d=>{ const v=dates[d]||''; const hasUserNote=!!(userNotes[d]&&userNotes[d].trim()); const starHtml=hasUserNote?'<span class="note-star">★</span>':''; const titleAttr=hasUserNote?` title="${(userNotes[d]||'').replace(/"/g,'&quot;')}"`:'' ; return `<td class="date-cell" onclick="openEdit('${key.replace(/'/g,"\\'")}','${d}')"${titleAttr}>${cellHtml(v)}${starHtml}</td>`; }).join('');
+      cells=filteredDates.map(d=>{ const v=dates[d]||''; const hasUserNote=!!(userNotes[d]&&userNotes[d].trim()); const starHtml=hasUserNote?'<span class="note-star">&#9733;</span>':''; const titleAttr=hasUserNote?` title="${(userNotes[d]||'').replace(/"/g,'&quot;')}"`:'' ; return `<td class="date-cell" onclick="openEdit('${key.replace(/'/g,"\\'")}','${d}')"${titleAttr}>${cellHtml(v)}${starHtml}</td>`; }).join('');
     }
     return `<tr><td><span class="name-badge ${nc}">${fn}</span></td><td><span class="name-badge ${nc}">${ln}</span>${wuTag}</td><td class="${ptsColor(mainPts)}">${mainPts>0?mainPts%1===0?mainPts:mainPts.toFixed(1):'0'}</td><td class="${ptsColor(wp)}">${wp>0?wp%1===0?wp:wp.toFixed(1):'0'}</td>${cells}</tr>`;
   }).join('');
@@ -912,7 +927,7 @@ function openEdit(pk,dt) {
   editingPerson=pk; editingDate=dt;
   const p=attendanceData[pk], name=p?(p.displayName||pk):pk;
   document.getElementById('editTitle').textContent='Edit Entry';
-  document.getElementById('editSubtitle').textContent=name+' — '+fmtDateLong(dt);
+  document.getElementById('editSubtitle').textContent=name+' \u2014 '+fmtDateLong(dt);
   const input=document.getElementById('editInput');
   input.value=(p&&p.dates&&p.dates[dt])?p.dates[dt]:'';
   const noteEl=document.getElementById('editNote'), note=(p&&p.notes&&p.notes[dt])?p.notes[dt]:'';
