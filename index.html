@@ -157,12 +157,12 @@
   .toast.error{border-color:rgba(255,107,122,0.4)}
   .toast.success{border-color:rgba(74,222,128,0.4)}
   /* Import log footer */
-  #importLog{flex-shrink:0;border-top:1px solid var(--border);background:var(--surface);padding:5px 24px;display:flex;align-items:flex-start;gap:10px;min-height:28px}
-  #importLog.log-empty{display:none}
-  .import-log-label{font-size:0.62rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;flex-shrink:0;padding-top:3px}
-  #importLogEntries{display:flex;flex-direction:column;gap:3px;flex:1;overflow:visible}
-  .import-log-entry{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:0.65rem;color:var(--text-muted);padding:1px 0}
-  .import-log-entry .log-num{font-size:0.6rem;color:var(--text-muted);font-weight:700;min-width:16px}
+  #importLogEntries{display:flex;flex-direction:column;gap:2px;max-height:60vh;overflow-y:auto}
+  .import-log-empty{font-size:0.8rem;color:var(--text-muted);text-align:center;padding:20px 0}
+  .import-log-entry{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:0.78rem;color:var(--text-muted);padding:7px 8px;border-radius:8px}
+  .import-log-entry:hover{background:var(--surface2)}
+  .import-log-entry .log-num{font-size:0.7rem;color:var(--text-muted);font-weight:700;min-width:20px}
+  .log-count{display:inline-block;margin-left:5px;font-size:0.65rem;font-weight:700;padding:1px 6px;border-radius:999px;background:var(--surface2);color:var(--text-muted)}
   .import-log-entry .log-who{color:var(--accent);font-weight:600}
   .import-log-entry .log-sep{color:var(--border-light);margin:0 1px}
   .import-log-entry .log-del{margin-left:auto;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.7rem;padding:0 2px;line-height:1;opacity:0.5;transition:opacity 0.15s}
@@ -234,6 +234,7 @@
       </div>
       <button class="btn" id="hideBtn" onclick="toggleShowHidden()">Show Hidden</button>
       <button class="btn" onclick="openImport()">&#8593; Import</button>
+      <button class="btn" onclick="openImportHistory()">&#128339; History<span class="log-count" id="importLogCount" style="display:none"></span></button>
       <button class="btn" onclick="exportCSV()">&#8595; Export</button>
       <button class="btn danger" onclick="confirmClear()">Clear</button>
       <button class="btn" onclick="handleLock()">&#128274; Lock</button>
@@ -248,11 +249,6 @@
       <thead id="tableHead"></thead>
       <tbody id="tableBody"></tbody>
     </table>
-  </div>
-  <!-- Import Log Footer -->
-  <div id="importLog" class="log-empty">
-    <span class="import-log-label">Imports</span>
-    <div id="importLogEntries"></div>
   </div>
 </div>
 
@@ -324,6 +320,17 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="importHistoryModal" onclick="if(event.target===this)closeImportHistory()">
+  <div class="modal" style="width:540px">
+    <h3>Import History</h3>
+    <p class="subtitle">Every weekly report imported into this tracker, newest first</p>
+    <div id="importLogEntries"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeImportHistory()">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -376,10 +383,11 @@ function logImport(count, dateRange) {
 }
 
 function renderImportLog() {
-  const logEl = document.getElementById('importLog');
   const entriesEl = document.getElementById('importLogEntries');
-  if (!importLogEntries.length) { logEl.classList.add('log-empty'); return; }
-  logEl.classList.remove('log-empty');
+  const countEl = document.getElementById('importLogCount');
+  countEl.textContent = importLogEntries.length;
+  countEl.style.display = importLogEntries.length ? 'inline-block' : 'none';
+  if (!importLogEntries.length) { entriesEl.innerHTML = '<div class="import-log-empty">No imports yet</div>'; return; }
   entriesEl.innerHTML = importLogEntries.map((e, i) => {
     const num = importLogEntries.length - i;
     const rangeHtml = (e.dateRange && e.dateRange !== 'undefined')
@@ -398,8 +406,12 @@ function renderImportLog() {
   }).join('');
 }
 
+function openImportHistory() { renderImportLog(); document.getElementById('importHistoryModal').classList.add('active'); }
+function closeImportHistory() { document.getElementById('importHistoryModal').classList.remove('active'); }
+
 function deleteImportLog(id) {
   if (!id) return;
+  if (!confirm('Remove this entry from import history?')) return;
   importLogRef.child(id).remove().catch(err => console.error('Import log delete failed:', err));
   importLogEntries = importLogEntries.filter(e => e.id !== id);
   renderImportLog();
