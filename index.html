@@ -307,7 +307,7 @@
 <div class="modal-overlay" id="importModal">
   <div class="import-box">
     <h3 style="margin-bottom:4px;font-weight:700;">Import Weekly Report</h3>
-    <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">Upload the Excel attendance file from your timeclock system</p>
+    <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">Upload the attendance notices file, or a time-off requests report to excuse approved sick days</p>
     <div class="drop-zone" id="dropZone">
       <p><strong>Drop .xlsx file here</strong><br>or click to browse</p>
     </div>
@@ -364,7 +364,7 @@ function loadImportLog() {
   });
 }
 
-function logImport(count, dateRange) {
+function logImport(count, dateRange, kind) {
   const now = new Date();
   const mo = now.getMonth() + 1, dy = now.getDate(), yr = String(now.getFullYear()).slice(2);
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -374,6 +374,7 @@ function logImport(count, dateRange) {
     who,
     count: count || 0,
     dateRange: dateRange || '',
+    kind: kind || '',
     label: `${mo}/${dy}/${yr} ${timeStr}`,
     ts: Date.now()
   };
@@ -398,7 +399,7 @@ function renderImportLog() {
       <span class="log-num">${num}.</span>
       <span class="log-who">${e.who}</span>
       <span class="log-sep">&#183;</span>
-      <span>${e.count} budtenders</span>
+      <span>${e.kind ? e.kind : e.count + ' budtenders'}</span>
       ${rangeHtml}
       ${label ? `<span class="log-sep">&#183;</span><span>${label}</span>` : ''}
       <button class="log-del" onclick="deleteImportLog('${e.id}')" title="Remove">&#x2715;</button>
@@ -580,6 +581,7 @@ function openImport() {
   pendingImport = null;
   document.getElementById('importPreview').style.display = 'none';
   document.getElementById('confirmImportBtn').style.display = 'none';
+  document.getElementById('confirmImportBtn').textContent = 'Import Data';
 }
 function closeImport() { document.getElementById('importModal').classList.remove('active'); pendingImport = null; }
 const dropZone = document.getElementById('dropZone');
@@ -598,6 +600,9 @@ function processFile(file) {
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
       if (!rows.length) { toast('File appears empty', 'error'); return; }
       const cols = Object.keys(rows[0]);
+      if (cols.some(c => /^start date$/i.test(c.trim())) && cols.some(c => /^end date$/i.test(c.trim())) && cols.some(c => /^status$/i.test(c.trim()))) {
+        parseTimeOff(rows, cols); return;
+      }
       const nameCol = cols.find(c => /^name$/i.test(c.trim())) || cols.find(c => /name/i.test(c));
       const dateCol = cols.find(c => /^date$/i.test(c.trim())) || cols.find(c => /date/i.test(c));
       const typeCol = cols.find(c => /^type$/i.test(c.trim())) || cols.find(c => /type/i.test(c));
@@ -649,6 +654,88 @@ function parseIncidentLog(rows, nameCol, dateCol, typeCol) {
   });
   showPreview(parsed);
 }
+// ── Time-off report (When I Work) → excuse points on approved sick days ─────
+function toISODate(raw) {
+  if (typeof raw === 'number') { const d = XLSX.SSF.parse_date_code(raw); return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`; }
+  const str = (raw||'').toString().trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0,10);
+  const d = new Date(str); return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function timeOffMins(raw, fallback) {
+  if (typeof raw === 'number' && raw >= 0 && raw < 1) return Math.round(raw * 1440);
+  const m = parseTimeToMins((raw||'').toString());
+  if (m === null) return fallback;
+  return /11:59\s*pm/i.test(raw) ? 1440 : m;
+}
+function addDaysISO(ds, n) { const d = new Date(ds + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function findPersonKey(name) {
+  if (attendanceData[name]) return name;
+  const sk = name.replace(/[^a-zA-Z0-9_, -]/g, '_');
+  if (attendanceData[sk]) return sk;
+  const low = name.toLowerCase();
+  return Object.keys(attendanceData).find(k => (attendanceData[k].displayName||k).toLowerCase() === low) || null;
+}
+function parseTimeOff(rows, cols) {
+  const col = re => cols.find(c => re.test(c.trim()));
+  const nameCol = col(/^name$/i), typeCol = col(/^type$/i), statusCol = col(/^status$/i);
+  const sdCol = col(/^start date$/i), stCol = col(/^start time$/i), edCol = col(/^end date$/i), etCol = col(/^end time$/i);
+  const byCol = col(/approved.*by/i);
+  const parsed = {}, unmatched = new Set();
+  let sickDays = 0, alreadyExcused = 0;
+  rows.forEach(row => {
+    if (!/sick/i.test(row[typeCol]||'') || !/^approved$/i.test((row[statusCol]||'').toString().trim())) return;
+    const name = (row[nameCol]||'').toString().trim();
+    const sd = toISODate(row[sdCol]), ed = toISODate(row[edCol]);
+    if (!name || !sd || !ed) return;
+    const startM = timeOffMins(row[stCol], 0), endM = timeOffMins(row[etCol], 1440);
+    const key = findPersonKey(name);
+    const by = byCol ? (row[byCol]||'').toString().trim() : '';
+    for (let d = sd; d <= ed; d = addDaysISO(d, 1)) {
+      const winStart = d === sd ? startM : 0;
+      const winEnd = d === ed ? endM : 1440;
+      if (winEnd <= winStart) continue; // e.g. request ending 12:00 am on this day
+      sickDays++;
+      if (!key) { unmatched.add(name); continue; }
+      const p = attendanceData[key];
+      const val = p.dates && p.dates[d];
+      if (val === 'Excused') { alreadyExcused++; continue; }
+      if (getPoints(val) <= 0) continue;
+      const note = (p.notes && p.notes[d]) || '';
+      const sm = note.match(/Shift:\s*([0-9:]+\s*[AP]M)\s*-\s*([0-9:]+\s*[AP]M)/i);
+      const shiftStart = sm ? parseTimeToMins(sm[1]) : null;
+      let shiftEnd = sm ? parseTimeToMins(sm[2]) : null;
+      if (shiftEnd !== null && shiftStart !== null && shiftEnd <= shiftStart) shiftEnd += 1440;
+      let covered;
+      if (shiftStart === null) covered = true;
+      else if (val.toString().trim() === '0.5') covered = winStart <= shiftStart && winEnd > shiftStart; // late: sick time must cover the shift start
+      else covered = winStart < shiftEnd && winEnd > shiftStart; // no-show: any overlap with the shift
+      if (!covered) continue;
+      if (!parsed[key]) parsed[key] = { displayName: p.displayName || key, dates: {}, notes: {}, was: {} };
+      parsed[key].dates[d] = 'Excused';
+      parsed[key].was[d] = val;
+      parsed[key].notes[d] = (note ? note + ' | ' : '') + 'Excused: approved sick time off' + (by ? ' (' + by + ')' : '');
+    }
+  });
+  showTimeOffPreview(parsed, { sickDays, alreadyExcused, unmatched: [...unmatched] });
+}
+function showTimeOffPreview(parsed, stats) {
+  pendingImport = parsed;
+  const changes = [];
+  Object.values(parsed).forEach(p => Object.keys(p.dates).forEach(d => changes.push({ name: p.displayName, d, was: p.was[d] })));
+  changes.sort((a, b) => a.d.localeCompare(b.d));
+  const fmt = ds => { const d = new Date(ds + 'T00:00:00'); return (d.getMonth()+1) + '/' + d.getDate(); };
+  const p = document.getElementById('importPreview');
+  p.innerHTML = `<p style="margin-bottom:8px"><strong>Time-off report:</strong> ${stats.sickDays} approved sick days &middot; ${stats.alreadyExcused} already excused &middot; <strong>${changes.length}</strong> point${changes.length===1?'':'s'} to excuse</p>
+    ${stats.unmatched.length ? `<p style="margin-bottom:8px;color:var(--text-muted)">Not on tracker: ${stats.unmatched.join(', ')}</p>` : ''}
+    ${changes.length ? `<table><thead><tr><th>Name</th><th>Date</th><th>Was</th><th>Now</th></tr></thead><tbody>
+    ${changes.map(c => `<tr><td>${c.name}</td><td>${fmt(c.d)}</td><td>${c.was}</td><td style="color:var(--green)">Excused</td></tr>`).join('')}
+    </tbody></table>` : '<p style="color:var(--text-muted)">Nothing to change.</p>'}`;
+  p.style.display = 'block';
+  const btn = document.getElementById('confirmImportBtn');
+  btn.textContent = 'Apply Excused';
+  btn.style.display = changes.length ? 'inline-flex' : 'none';
+}
+// ─────────────────────────────────────────────────────────────────────────────
 function mapType(type, row) {
   const pos = (row['Position']||'').toString().toLowerCase();
   const allVals = Object.values(row).map(v => (v||'').toString().toLowerCase()).join(' ');
@@ -753,6 +840,7 @@ function confirmImport() {
     dateRange = first === last ? first : first + ' - ' + last;
   }
 
+  const isTimeOff = Object.values(snapshot).some(v => v.was);
   Object.entries(snapshot).forEach(([k,v]) => {
     if (!attendanceData[k]) attendanceData[k] = { displayName: v.displayName, dates: {}, notes: {} };
     if (!attendanceData[k].dates) attendanceData[k].dates = {};
@@ -762,8 +850,14 @@ function confirmImport() {
   });
 
   saveData(); rebuildDates(); renderTable(); closeImport();
-  logImport(count, dateRange);
-  toast('Imported ' + count + ' budtenders', 'success');
+  if (isTimeOff) {
+    const n = Object.values(snapshot).reduce((t, v) => t + Object.keys(v.dates).length, 0);
+    logImport(count, dateRange, 'Sick time off: ' + n + ' excused');
+    toast('Excused ' + n + ' points for approved sick time', 'success');
+  } else {
+    logImport(count, dateRange);
+    toast('Imported ' + count + ' budtenders', 'success');
+  }
 }
 function rebuildDates() {
   const s = new Set();
