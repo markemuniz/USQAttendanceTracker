@@ -9,6 +9,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4.4.1/dist/email.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -131,6 +132,18 @@
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
   .modal-overlay.active{display:flex}
   .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:440px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,0.5);animation:fadeUp 0.25s ease both;max-height:92vh;overflow-y:auto}
+  .ca-banner{display:none;align-items:center;gap:10px;padding:8px 24px;background:rgba(255,107,122,0.08);border-bottom:1px solid rgba(255,107,122,0.3);font-size:0.78rem;color:var(--red);flex-shrink:0;flex-wrap:wrap}
+  .ca-banner.active{display:flex}
+  .ca-banner .ca-chip{padding:3px 10px;border-radius:5px;border:1px solid rgba(255,107,122,0.4);background:rgba(255,107,122,0.1);color:var(--red);font-family:inherit;font-size:0.72rem;font-weight:600;cursor:pointer}
+  .ca-banner .ca-chip:hover{background:rgba(255,107,122,0.2)}
+  .ca-folder{display:inline-flex;align-items:center;justify-content:center;width:24px;height:22px;margin-left:6px;padding:0;vertical-align:middle;border-radius:5px;border:1px solid rgba(255,107,122,0.4);background:rgba(255,107,122,0.1);color:var(--red);cursor:pointer;transition:background 0.15s}
+  .ca-folder:hover{background:rgba(255,107,122,0.25)}
+  .ca-folder svg{width:13px;height:13px}
+  .ca-modal{width:860px;max-width:96vw}
+  .ca-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}
+  .ca-grid label{display:block;font-size:0.65rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px}
+  .ca-grid input,.ca-grid select{width:100%;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.8rem;outline:none;color-scheme:dark}
+  .ca-grid input:focus,.ca-grid select:focus{border-color:var(--accent)}
   .modal h3{font-size:1rem;font-weight:700;margin-bottom:4px}
   .modal .subtitle{font-size:0.8rem;color:var(--text-muted);margin-bottom:18px}
   .modal-btns{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
@@ -217,8 +230,11 @@
       <div class="key-sep"></div>
       <div class="key-item"><div class="key-swatch" style="background:#38bdf8"></div> PS&amp;STO used</div>
       <div class="key-item"><span style="color:#facc15;font-size:0.85rem">&#9733;</span> Has note</div>
+      <div class="key-sep"></div>
+      <div class="key-item"><span class="ca-folder" style="margin-left:0;cursor:default"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span> Corrective action needed (click to open)</div>
     </div>
   </div>
+  <div class="ca-banner" id="caBanner"></div>
   <div class="toolbar">
     <input class="search-box" id="searchBox" type="text" placeholder="Search budtenders..." oninput="renderTable()">
     <div class="toolbar-right">
@@ -323,6 +339,39 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="caModal">
+  <div class="modal ca-modal">
+    <h3 style="font-style:italic">Corrective Action</h3>
+    <p class="subtitle" id="caSubtitle"></p>
+    <div class="ca-grid">
+      <div><label>Corrective Action</label><select id="caStage" onchange="caRefresh()"><option value="first">First Warning</option><option value="second">Second Warning</option><option value="final">Final Warning</option><option value="termination">Termination</option></select></div>
+      <div><label>Date</label><input type="date" id="caDate" onchange="caRefresh()"></div>
+      <div><label>Employee ID</label><input type="text" id="caEmpId" oninput="caRefresh()" placeholder="Not on file"></div>
+      <div><label>Job Title</label><input type="text" id="caTitle" oninput="caRefresh()"></div>
+      <div><label>Direct Supervisor</label><input type="text" id="caSupervisor" oninput="caRefresh()"></div>
+      <div><label>Work Location</label><input type="text" id="caLocation" oninput="caRefresh()"></div>
+      <div><label>Email To (first name)</label><input type="text" id="caEmailTo" oninput="caRefresh()"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn primary" id="caTabForm" onclick="caSetView('form')">Form</button>
+      <button class="btn" id="caTabEmail" onclick="caSetView('email')">Email</button>
+    </div>
+    <iframe id="caEmailPreview" title="Email preview" style="display:none;width:100%;height:48vh;border:0;border-radius:8px;background:#fff"></iframe>
+    <iframe id="caPreview" title="Corrective action preview" style="width:100%;height:48vh;border:0;border-radius:8px;background:#fff"></iframe>
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="caDownload()">&#8595; Download (.doc)</button>
+        <button class="btn" onclick="caPrint()">&#128438; Print / Save PDF</button>
+        <button class="btn" onclick="caCopyEmail()">&#9993; Copy email</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="closeCA()">Close</button>
+        <button class="btn primary" id="caRecordBtn" onclick="caRecord()">Record in tracker</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="importHistoryModal" onclick="if(event.target===this)closeImportHistory()">
   <div class="modal" style="width:540px">
     <h3>Import History</h3>
@@ -350,6 +399,8 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const dataRef = firebase.database().ref('attendance_usq');
 const importLogRef = firebase.database().ref('importLog');
+const employeesRef = firebase.database().ref('employees');
+const caAlertsRef = firebase.database().ref('caAlertsSent');
 
 let currentUserEmail = '';
 let importLogEntries = []; // sorted newest first
@@ -465,6 +516,8 @@ function showApp() {
   document.getElementById('appView').style.display = 'flex';
   loadData();
   loadImportLog();
+  loadEmployees();
+  loadCAAlerts();
 }
 auth.onAuthStateChanged(user => {
   if (user) {
@@ -491,6 +544,7 @@ let initialLoad = true;
 function loadData() {
   dataRef.on('value', snap => {
     attendanceData = snap.val() || {};
+    caDataLoaded = true;
     committedState = JSON.stringify(attendanceData);
     localStorage.setItem('bt_attendance_usq', JSON.stringify(attendanceData));
     rebuildDates(); renderTable();
@@ -616,12 +670,12 @@ document.addEventListener('click', e => {
 });
 function openImport() {
   document.getElementById('importModal').classList.add('active');
-  pendingImport = null;
+  pendingImport = null; pendingEmployees = null;
   document.getElementById('importPreview').style.display = 'none';
   document.getElementById('confirmImportBtn').style.display = 'none';
   document.getElementById('confirmImportBtn').textContent = 'Import Data';
 }
-function closeImport() { document.getElementById('importModal').classList.remove('active'); pendingImport = null; }
+function closeImport() { document.getElementById('importModal').classList.remove('active'); pendingImport = null; pendingEmployees = null; }
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 dropZone.addEventListener('click', () => fileInput.click());
@@ -638,6 +692,7 @@ function processFile(file) {
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
       if (!rows.length) { toast('File appears empty', 'error'); return; }
       const cols = Object.keys(rows[0]);
+      if (cols.some(c => /employee.?(id|number|no)/i.test(c)) && cols.some(c => /first.?name/i.test(c)) && cols.some(c => /last.?name/i.test(c))) { parseEmployeeList(rows, cols); return; }
       if (cols.some(c => /^start date$/i.test(c.trim())) && cols.some(c => /^end date$/i.test(c.trim())) && cols.some(c => /^status$/i.test(c.trim()))) {
         parseTimeOff(rows, cols); return;
       }
@@ -757,7 +812,7 @@ function parseTimeOff(rows, cols) {
   showTimeOffPreview(parsed, { sickDays, alreadyExcused, unmatched: [...unmatched] });
 }
 function showTimeOffPreview(parsed, stats) {
-  pendingImport = parsed;
+  pendingImport = parsed; pendingEmployees = null;
   const changes = [];
   Object.values(parsed).forEach(p => Object.keys(p.dates).forEach(d => changes.push({ name: p.displayName, d, was: p.was[d] })));
   changes.sort((a, b) => a.d.localeCompare(b.d));
@@ -849,7 +904,7 @@ function parseGrid(rows, fnCol, lnCol, cols) {
   showPreview(parsed);
 }
 function showPreview(parsed) {
-  pendingImport = parsed;
+  pendingImport = parsed; pendingEmployees = null;
   const names = Object.keys(parsed);
   let ti = 0; names.forEach(n => ti += Object.keys(parsed[n].dates).length);
   const p = document.getElementById('importPreview');
@@ -862,7 +917,9 @@ function showPreview(parsed) {
   document.getElementById('confirmImportBtn').style.display = 'inline-flex';
 }
 function confirmImport() {
+  if (pendingEmployees) { confirmEmployeeImport(); return; }
   if (!pendingImport) return;
+  const caBefore = caPendingKeys();
   const snapshot = pendingImport;
   const count = Object.keys(snapshot).length;
 
@@ -896,6 +953,7 @@ function confirmImport() {
     logImport(count, dateRange);
     toast('Imported ' + count + ' budtenders', 'success');
   }
+  caAutoPrompt(caBefore);
 }
 function rebuildDates() {
   const s = new Set();
@@ -1085,6 +1143,7 @@ function renderTable() {
     ?filteredPeriods.map(p=>`<th class="period-col">${periodInfo.fmtFn(p)}</th>`).join('')
     :filteredDates.map(d=>`<th class="date-col">${fmtDate(d)}</th>`).join('');
   document.getElementById('tableHead').innerHTML=`<tr><th title="NYC Paid Safe & Sick Time hours remaining (of ${STO_ANNUAL_HOURS})">PS&amp;STO</th><th>First Name</th><th>Last Name</th><th><span class="header-dropdown" onclick="togglePtsDropdown(event)">${ptsLabel}</span></th><th>Write-Up Pts</th>${headerCols}</tr>`;
+  const caPending=new Set(caPendingKeys());
   document.getElementById('tableBody').innerHTML=people.map(([key,person])=>{
     const name=person.displayName||key;
     let fn='',ln='';
@@ -1095,6 +1154,7 @@ function renderTable() {
     const wp=getWriteupPts(dates);
     if (!showHidden&&person.hidden) return '';
     const termed=isTerminated(dates), nc=getNameColor(dates,termed), wuTag=getWriteupTagHtml(dates);
+    const caFolder=caPending.has(key)?`<button class="ca-folder" data-key="${escHtml(key)}" onclick="openCA(this.dataset.key)" title="Corrective action needed: ${CA_STAGES[caNextStage(dates)].label} (${fmtPts(caCurrentPts(dates))} pts). Click to open.">${CA_FOLDER_SVG}</button>`:'';
     const stoRem=getStoRemaining(dates);
     let cells;
     if (periodInfo) {
@@ -1102,8 +1162,9 @@ function renderTable() {
     } else {
       cells=filteredDates.map(d=>{ const v=dates[d]||''; const hasUserNote=!!(userNotes[d]&&userNotes[d].trim()); const starHtml=hasUserNote?'<span class="note-star">&#9733;</span>':''; const titleAttr=hasUserNote?` title="${(userNotes[d]||'').replace(/"/g,'&quot;')}"`:'' ; return `<td class="date-cell" onclick="openEdit('${key.replace(/'/g,"\\'")}','${d}')"${titleAttr}>${cellHtml(v)}${starHtml}</td>`; }).join('');
     }
-    return `<tr><td class="${stoColorClass(stoRem)}" title="${getStoUsedMins(dates)>0?fmtMins(getStoUsedMins(dates))+' used of '+STO_ANNUAL_HOURS+':00':'No PS&STO used'}">${fmtStoHrs(stoRem)}</td><td><span class="name-badge ${nc}">${fn}</span></td><td><span class="name-badge ${nc}">${ln}</span>${wuTag}</td><td class="${ptsColor(mainPts)}">${mainPts>0?mainPts%1===0?mainPts:mainPts.toFixed(1):'0'}</td><td class="${ptsColor(wp)}">${wp>0?wp%1===0?wp:wp.toFixed(1):'0'}</td>${cells}</tr>`;
+    return `<tr><td class="${stoColorClass(stoRem)}" title="${getStoUsedMins(dates)>0?fmtMins(getStoUsedMins(dates))+' used of '+STO_ANNUAL_HOURS+':00':'No PS&STO used'}">${fmtStoHrs(stoRem)}</td><td><span class="name-badge ${nc}">${fn}</span></td><td><span class="name-badge ${nc}">${ln}</span>${wuTag}${caFolder}</td><td class="${ptsColor(mainPts)}">${mainPts>0?mainPts%1===0?mainPts:mainPts.toFixed(1):'0'}</td><td class="${ptsColor(wp)}">${wp>0?wp%1===0?wp:wp.toFixed(1):'0'}</td>${cells}</tr>`;
   }).join('');
+  updateCABanner();
 }
 function fmtDateLong(d) {
   try { const dt=new Date(d+'T00:00:00'); return (dt.getMonth()+1).toString().padStart(2,'0')+'/'+dt.getDate().toString().padStart(2,'0')+'/'+dt.getFullYear(); }
@@ -1129,12 +1190,14 @@ function saveEdit() {
   if (!editingPerson||!editingDate) return;
   const val=document.getElementById('editInput').value.trim();
   const userNote=document.getElementById('userNoteInput').value.trim();
+  const caBefore=caPendingKeys();
   if (!attendanceData[editingPerson]) attendanceData[editingPerson]={displayName:editingPerson,dates:{}};
   if (!attendanceData[editingPerson].dates) attendanceData[editingPerson].dates={};
   if (!attendanceData[editingPerson].userNotes) attendanceData[editingPerson].userNotes={};
   if (val) attendanceData[editingPerson].dates[editingDate]=val; else delete attendanceData[editingPerson].dates[editingDate];
   if (userNote) attendanceData[editingPerson].userNotes[editingDate]=userNote; else delete attendanceData[editingPerson].userNotes[editingDate];
   saveData(); rebuildDates(); renderTable(); closeEdit();
+  caAutoPrompt(caBefore);
 }
 function closeEdit() { document.getElementById('editModal').classList.remove('active'); editingPerson=editingDate=null; }
 function deletePerson() {
@@ -1165,6 +1228,518 @@ function confirmClear() {
   if (!confirm('Are you sure?')) return;
   attendanceData={}; saveData(); rebuildDates(); renderTable(); toast('All data cleared','success');
 }
+// Managers don't clock in/out, so they're kept out of corrective actions and alert emails.
+const MANAGERS = [['mark','muniz'], ['jeff','mchale']];
+function isManager(name) {
+  const s = (name || '').toString().toLowerCase();
+  let fn, ln;
+  if (s.includes(',')) { const p = s.split(','); ln = p[0]; fn = p[1] || ''; }
+  else { const p = s.trim().split(/\s+/); fn = p[0] || ''; ln = p[p.length - 1] || ''; }
+  fn = fn.trim().split(/\s+/)[0] || ''; ln = ln.trim().split(/\s+/).pop() || '';
+  const clean = x => x.replace(/[^a-z]/g, '');
+  return MANAGERS.some(([f, l]) => clean(fn) === f && clean(ln) === l);
+}
+function toLocalYMD(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+// ── Corrective Action (auto-generated at 3 points) ───────────────────────────
+// Anyone whose current points (same number that turns the name red: points since
+// their last write-up, or last-60-days if never written up) reach 3 gets a
+// corrective-action form pre-filled from the occurrence history. "Record in
+// tracker" drops the 1st/2nd/Final/Terminated marker on the form date, which
+// resets their write-up points and clears them from the banner.
+const CA_FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const CA_CONFIG = { company: 'The Travel Agency: USQ', supervisor: 'Jennifer Bartholomeo', location: 'USQ', title: 'Budtender', emailTo: 'Melissa' };
+// First names of supervisors; anyone else defaults to CA_CONFIG.title
+const CA_SUPERVISORS = [];   // add USQ supervisors' first names (lowercase) here
+function caTitleFor(fn) { return CA_SUPERVISORS.includes((fn || '').trim().split(/\s+/)[0].toLowerCase()) ? 'Supervisor' : CA_CONFIG.title; }
+const CA_THRESHOLD = 3;
+const CA_STAGES = {
+  first:       { label: 'First Warning',  marker: '1st' },
+  second:      { label: 'Second Warning', marker: '2nd' },
+  final:       { label: 'Final Warning',  marker: 'Final' },
+  termination: { label: 'Termination',    marker: 'Terminated' }
+};
+let employees = {};       // { "first_last": { first, last, id } } — lives in Firebase, never in the repo
+let pendingEmployees = null;
+let caPerson = null;      // attendanceData key of the person in the modal
+let caOccurrences = [];
+let caPriorCycles = [];
+
+function escHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function splitName(name) {
+  let fn = '', ln = '';
+  if (name.includes(',')) { const parts = name.split(',').map(s => s.trim()); ln = parts[0]; fn = parts[1] || ''; }
+  else { const parts = name.split(' ').map(s => s.trim()).filter(Boolean); if (parts.length >= 2) { fn = parts[0]; ln = parts.slice(1).join(' '); } else { fn = parts[0] || name; } }
+  return { fn, ln };
+}
+function empKey(fn, ln) { return (fn + '_' + ln).toLowerCase().replace(/[^a-z0-9_]/g, ''); }
+
+// ── Employee ID list ──
+function loadEmployees() {
+  try { employees = JSON.parse(localStorage.getItem('bt_employees_usq') || '{}') || {}; } catch(e) { employees = {}; }
+  employeesRef.on('value', snap => {
+    employees = snap.val() || {};
+    try { localStorage.setItem('bt_employees_usq', JSON.stringify(employees)); } catch(e) {}
+  }, err => console.warn('Employees load failed, using cached list:', err.message));
+}
+function parseEmployeeList(rows, cols) {
+  const fnCol = cols.find(c => /first.?name/i.test(c));
+  const lnCol = cols.find(c => /last.?name/i.test(c));
+  const idCol = cols.find(c => /employee.?(id|number|no)/i.test(c));
+  const map = {};
+  rows.forEach(r => {
+    const fn = (r[fnCol] || '').toString().trim(), ln = (r[lnCol] || '').toString().trim();
+    const id = (r[idCol] === 0 ? '0' : (r[idCol] || '')).toString().trim();
+    if (!fn || !ln || !id) return;
+    map[empKey(fn, ln)] = { first: fn, last: ln, id };
+  });
+  const n = Object.keys(map).length;
+  if (!n) { toast('No employees with an ID found in this file', 'error'); return; }
+  pendingEmployees = map;
+  pendingImport = null;
+  const p = document.getElementById('importPreview');
+  p.innerHTML = `<p style="margin-bottom:8px"><strong>${n}</strong> employee IDs (used to fill corrective action forms)</p>
+    <table><thead><tr><th>Name</th><th>ID</th></tr></thead><tbody>
+    ${Object.values(map).slice(0,15).map(e => `<tr><td>${escHtml(e.first)} ${escHtml(e.last)}</td><td>${escHtml(e.id)}</td></tr>`).join('')}
+    ${n>15?`<tr><td colspan="2" style="color:var(--text-muted)">...+${n-15} more</td></tr>`:''}
+    </tbody></table>`;
+  p.style.display = 'block';
+  document.getElementById('confirmImportBtn').style.display = 'inline-flex';
+}
+function confirmEmployeeImport() {
+  const map = pendingEmployees; pendingEmployees = null;
+  employees = map;
+  try { localStorage.setItem('bt_employees_usq', JSON.stringify(employees)); } catch(e) {}
+  employeesRef.set(map).catch(err => toast('Employee list save failed: ' + err.message, 'error'));
+  closeImport();
+  renderTable();
+  toast('Saved ' + Object.keys(map).length + ' employee IDs', 'success');
+}
+// Older versions imported the ID file as attendance, leaving each ID in the person's row
+// under an "Employee ID" pseudo-date. Read the ID from there when the employee list has none.
+function caRowId(p) {
+  const keys = Object.keys((p && p.dates) || {});
+  // the column is named like an ID, or (whatever it is called) is not a date and holds a plain number
+  const k = keys.find(k => /^(employee.?)?(id|number|no)$/i.test(k.trim()))
+         || keys.find(k => !/^\d{4}-\d{2}-\d{2}/.test(k) && /^\d{3,8}$/.test(String(p.dates[k]).trim()));
+  return k ? String(p.dates[k] == null ? '' : p.dates[k]).trim() : '';
+}
+function findRowEmployeeId(fn, ln) {
+  const want = empKey(fn, ln);
+  for (const p of Object.values(attendanceData)) {
+    const nm = splitName(p.displayName || '');
+    if (empKey(nm.fn, nm.ln) !== want) continue;
+    const id = caRowId(p);
+    if (id) return id;
+  }
+  return '';
+}
+function findEmployeeId(fn, ln) {
+  const exact = employees[empKey(fn, ln)];
+  if (exact) return exact.id || '';
+  // nicknames / short forms (Will vs William): same last name, one first name starts with the other
+  const f = fn.toLowerCase(), l = ln.toLowerCase();
+  const hits = Object.values(employees).filter(e => (e.last || '').toLowerCase() === l && f && (e.first || '').toLowerCase() && ((e.first.toLowerCase().startsWith(f)) || f.startsWith(e.first.toLowerCase())));
+  return hits.length === 1 ? (hits[0].id || '') : '';
+}
+
+// ── Who needs a corrective action, and which one ──
+function caNextStage(dates) {
+  const wu = getLatestWriteup(dates);
+  if (wu === '1st') return 'second';
+  if (wu === '2nd') return 'final';
+  if (wu === 'final') return 'termination';
+  return 'first';   // never written up, or last cycle was marked Completed
+}
+function caCurrentPts(dates) { return getLatestWriteup(dates) !== null ? getWriteupPts(dates) : getLast60Pts(dates); }
+function caNeeds(person) {
+  if (!person || person.hidden || isManager(person.displayName)) return false;
+  const dates = person.dates || {};
+  if (isTerminated(dates)) return false;
+  return caCurrentPts(dates) >= CA_THRESHOLD;
+}
+function caPendingKeys() { return Object.keys(attendanceData).filter(k => !isManager(k) && caNeeds(attendanceData[k])); }
+// The occurrences that make up the person's current points, oldest first.
+function caGetOccurrences(person) {
+  const dates = person.dates || {}, notes = person.notes || {};
+  const hasWU = getLatestWriteup(dates) !== null;
+  let lastWU = null;
+  if (hasWU) Object.entries(dates).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([d,v]) => { if (['1st','2nd','final','terminated','term','completed'].includes((v||'').toString().trim().toLowerCase())) lastWU = d; });
+  const today = new Date(); today.setHours(0,0,0,0);
+  const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 60);
+  const out = [];
+  Object.entries(dates).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([d,v]) => {
+    const pts = getPoints(v); if (!pts) return;
+    if (hasWU) { if (d <= lastWU) return; }
+    else { const ed = parseDate(d); if (!ed) return; ed.setHours(0,0,0,0); if (ed < cutoff || ed > today) return; }
+    out.push({ date: d, pts, label: caOccurrenceLabel(pts, notes[d] || '') });
+  });
+  return out;
+}
+// Earlier warnings in the person's current discipline chain, oldest first, each with the
+// occurrences that led to it: [{ marker:'1st', date:'2026-07-22', occurrences:[...] }].
+// A Completed/Terminated entry restarts the chain.
+function caGetPriorCycles(person) {
+  const dates = person.dates || {}, notes = person.notes || {};
+  const stages = { '1st': '1st', '2nd': '2nd', 'final': 'Final' };
+  let chain = [], bucket = [];
+  Object.entries(dates).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([d,v]) => {
+    const val = (v||'').toString().trim().toLowerCase();
+    // write-ups delivered before the tracker had the data: occurrences saved under person.priorWriteups[date]
+    if (stages[val]) { const saved = (person.priorWriteups || {})[d]; chain.push({ marker: stages[val], date: d, occurrences: (!bucket.length && saved && saved.occurrences) ? saved.occurrences : bucket }); bucket = []; }
+    else if (['completed','terminated','term'].includes(val)) { chain = []; bucket = []; }
+    else { const pts = getPoints(v); if (pts) bucket.push({ date: d, pts, label: caOccurrenceLabel(pts, notes[d] || '') }); }
+  });
+  return chain;
+}
+function caOccurrenceLabel(pts, note) {
+  if (pts >= 1) return /no.?call|ncns/i.test(note) ? 'No Call/No Show' : 'Call Out';
+  let mins = null;
+  const shift = (note.match(/Shift:\s*([^|]+)/i) || [])[1], clock = (note.match(/Clocked:\s*([^|]+)/i) || [])[1];
+  if (shift && clock) mins = calcLateMinutes(shift.trim(), clock.trim());
+  if (mins === null) { const paren = (note.match(/\(([^)]*)\)/) || [])[1]; if (paren) mins = parseMins(paren); }
+  if (mins === null || mins <= 0) return 'Late';
+  mins = Math.round(mins);
+  return mins + (mins === 1 ? ' minute late' : ' minutes late');
+}
+function fmtPts(n) { return n % 1 === 0 ? String(n) : n.toFixed(1); }
+function fmtUS(ds) { const [y,m,d] = ds.split('-'); return parseInt(m) + '/' + parseInt(d) + '/' + y; }
+function todayYMD() { return toLocalYMD(new Date()); }
+
+// ── Cleanup for the employee-ID file being imported as attendance (old versions) ──
+// That import added an "Employee ID" pseudo-date to people and created extra
+// "Last, First" rows holding nothing else. Removes only those leftovers: rows that
+// have no dates/notes of their own AND whose person also has another row.
+const JUNK_DATE_KEY = 'Employee ID';
+function caRowIsEmpty(p) {
+  const real = Object.keys(p.dates || {}).filter(k => k !== JUNK_DATE_KEY);
+  return !real.length && !(p.userNotes && Object.keys(p.userNotes).length);
+}
+function caJunkPlan() {
+  const groups = {};
+  Object.keys(attendanceData).forEach(k => {
+    const nm = splitName(attendanceData[k].displayName || k);
+    (groups[empKey(nm.fn, nm.ln)] = groups[empKey(nm.fn, nm.ln)] || []).push(k);
+  });
+  const remove = [];
+  Object.values(groups).forEach(keys => {
+    if (keys.length < 2) return;
+    const withData = keys.filter(k => !caRowIsEmpty(attendanceData[k]));
+    const empties = keys.filter(k => caRowIsEmpty(attendanceData[k]));
+    if (withData.length) remove.push(...empties);        // keep every row that has data
+    else remove.push(...empties.slice(1));                // all empty: keep just one
+  });
+  // rows created purely by the ID import (their only entry is the "Employee ID" pseudo-date)
+  Object.keys(attendanceData).forEach(k => { const p = attendanceData[k], ks = Object.keys(p.dates || {}); if (ks.length === 1 && ks[0] === JUNK_DATE_KEY && caRowIsEmpty(p) && !remove.includes(k)) remove.push(k); });
+  // never remove every row of a person who has more than one: keep the best one
+  Object.values(groups).forEach(keys => {
+    if (keys.length < 2 || !keys.every(k => remove.includes(k))) return;
+    const keep = keys.find(k => !(attendanceData[k].dates && JUNK_DATE_KEY in attendanceData[k].dates)) || keys[0];
+    remove.splice(remove.indexOf(keep), 1);
+  });
+  const strip = Object.keys(attendanceData).filter(k => attendanceData[k].dates && JUNK_DATE_KEY in attendanceData[k].dates && !remove.includes(k));
+  return { remove, strip };
+}
+function cleanupIdImport() {
+  const plan = caJunkPlan();
+  const names = plan.remove.map(k => attendanceData[k].displayName || k);
+  if (!confirm('Remove duplicate leftover rows?\n\nRows to delete (' + names.length + '):\n' + (names.join(', ') || 'none') + '\n\nThese have no dates or notes, and the same person has another row. The stray "Employee ID" column will also be removed from ' + plan.strip.length + ' other row(s). No real dates or points are changed.')) return;
+  // keep the IDs: copy them into the employee list before the stray column is removed
+  let saved = 0;
+  Object.values(attendanceData).forEach(p => {
+    const id = caRowId(p); if (!id) return;
+    const nm = splitName(p.displayName || ''), key = empKey(nm.fn, nm.ln);
+    if (nm.fn && nm.ln && !(employees[key] && employees[key].id)) { employees[key] = { first: nm.fn, last: nm.ln, id }; saved++; }
+  });
+  if (saved) {
+    try { localStorage.setItem('bt_employees_usq', JSON.stringify(employees)); } catch(e) {}
+    employeesRef.set(employees).catch(err => toast('Employee list save failed: ' + err.message, 'error'));
+  }
+  Object.values(attendanceData).forEach(p => { if (p.dates) delete p.dates[JUNK_DATE_KEY]; });
+  plan.remove.forEach(k => delete attendanceData[k]);
+  saveData(); rebuildDates(); renderTable();
+  toast('Removed ' + names.length + ' duplicate rows', 'success');
+}
+
+// ── Email alert at 3 points (EmailJS) ──
+// One email per person per discipline cycle. The "sent" marker lives in Firebase
+// (caAlertsSent/<key> = stage|last write-up date) and is claimed with a transaction,
+// so only one open copy of the tracker sends it. The marker is cleared once the
+// person drops off the corrective-action list (write-up recorded, points aged out),
+// so the next time they reach 3 they trigger a new email.
+const CA_EMAIL = { serviceId: 'service_tgk1onn', templateId: 'template_bh108b2', publicKey: 'N7F3dgrAKHdLinMWF' };
+let caAlertsSent = {};
+let caAlertsLoaded = false;
+let caDataLoaded = false;
+const caSendFailed = new Set();   // don't retry in a loop this session if EmailJS keeps failing
+if (window.emailjs) emailjs.init({ publicKey: CA_EMAIL.publicKey });
+
+function loadCAAlerts() {
+  caAlertsRef.on('value', snap => {
+    caAlertsSent = snap.val() || {};
+    caAlertsLoaded = true;
+    caSyncAlerts();
+  }, err => console.warn('Alert markers load failed, email alerts paused:', err.message));
+}
+function caLastWriteupDate(dates) {
+  let last = 'none';
+  Object.entries(dates || {}).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([d,v]) => {
+    if (['1st','2nd','final','terminated','term','completed'].includes((v||'').toString().trim().toLowerCase())) last = d;
+  });
+  return last;
+}
+function caAlertSig(p) { const dates = p.dates || {}; return caNextStage(dates) + '|' + caLastWriteupDate(dates); }
+// Builds the same form + template email the pop-up shows, using its defaults
+// (next stage, today's date, ID from the employee list, CA_CONFIG.emailTo).
+// Both go in the email body (EmailJS attachments need a paid plan).
+function caAlertContent(k) {
+  try {
+    const p = attendanceData[k], dates = p.dates || {}, nm = splitName(p.displayName || k);
+    const stage = caNextStage(dates);
+    const d = {
+      first: nm.fn, last: nm.ln, stage, date: todayYMD(),
+      empId: findEmployeeId(nm.fn, nm.ln) || caRowId(p) || findRowEmployeeId(nm.fn, nm.ln) || '',
+      title: caTitleFor(nm.fn), supervisor: CA_CONFIG.supervisor, location: CA_CONFIG.location,
+      sickRemaining: getStoRemaining(dates),
+      occurrences: caGetOccurrences(p),
+      prior: stage === 'first' ? [] : caGetPriorCycles(p)
+    };
+    const email = caEmailHtml(d, CA_CONFIG.emailTo);
+    return {
+      email: (email.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [, email])[1],
+      form: caFormHtml(d)
+    };
+  } catch (e) { console.warn('Could not build corrective action content:', e); return { email: '', form: '' }; }
+}
+function caSyncAlerts() {
+  if (!caAlertsLoaded || !caDataLoaded || !window.emailjs) return;
+  const pending = caPendingKeys();
+  // clear markers for people no longer on the list
+  Object.keys(caAlertsSent).forEach(k => { if (!pending.includes(k)) caAlertsRef.child(k).remove().catch(()=>{}); });
+  pending.forEach(k => {
+    const sig = caAlertSig(attendanceData[k]);
+    if (caAlertsSent[k] === sig || caSendFailed.has(k + '|' + sig)) return;
+    caAlertsRef.child(k).transaction(cur => cur === sig ? undefined : sig).then(res => {
+      if (!res.committed) return;   // someone else already sent it
+      const p = attendanceData[k]; if (!p) return;
+      const nm = splitName(p.displayName || k);
+      const ca = caAlertContent(k);
+      return emailjs.send(CA_EMAIL.serviceId, CA_EMAIL.templateId, {
+        employee_name: (nm.fn + ' ' + nm.ln).trim(),
+        points: fmtPts(caCurrentPts(p.dates || {})),
+        next_stage: CA_STAGES[caNextStage(p.dates || {})].label,
+        store: 'USQ',
+        ca_email: ca.email,
+        ca_form_html: ca.form
+      }).then(() => toast('Alert emailed: ' + nm.fn + ' ' + nm.ln + ' reached ' + CA_THRESHOLD + ' points', 'success'))
+        .catch(err => {
+          console.warn('EmailJS send failed:', err);
+          caSendFailed.add(k + '|' + sig);
+          toast('Alert email failed for ' + nm.fn + ' ' + nm.ln, 'error');
+          caAlertsRef.child(k).remove().catch(()=>{});   // allow a retry next load
+        });
+    }).catch(err => console.warn('Alert marker save failed:', err.message));
+  });
+}
+
+// ── Banner + auto prompt ──
+function updateCABanner() {
+  const el = document.getElementById('caBanner'); if (!el) return;
+  caSyncAlerts();
+  const jp = caJunkPlan();
+  if (!jp.remove.length && !jp.strip.length) { el.classList.remove('active'); el.innerHTML = ''; return; }
+  el.classList.add('active');
+  const what = jp.remove.length ? `Duplicate leftover rows found (${jp.remove.length}).` : 'Leftover employee ID import data found.';
+  el.innerHTML = `<strong>&#9888; ${what}</strong><button class="ca-chip" onclick="cleanupIdImport()">Review &amp; remove</button>`;
+}
+function caAutoPrompt(before) {
+  const fresh = caPendingKeys().filter(k => !before.includes(k));
+  if (!fresh.length) return;
+  openCA(fresh[0]);
+  if (fresh.length > 1) toast((fresh.length - 1) + ' more budtender(s) also need a corrective action (look for the folder icon)', 'error');
+}
+
+// ── Form ──
+function caFormData() {
+  const p = attendanceData[caPerson]; const nm = splitName(p.displayName || caPerson);
+  return {
+    first: nm.fn, last: nm.ln,
+    stage: document.getElementById('caStage').value,
+    date: document.getElementById('caDate').value,
+    empId: document.getElementById('caEmpId').value.trim(),
+    title: document.getElementById('caTitle').value.trim(),
+    supervisor: document.getElementById('caSupervisor').value.trim(),
+    location: document.getElementById('caLocation').value.trim(),
+    sickRemaining: getStoRemaining(attendanceData[caPerson].dates || {}),
+    occurrences: caOccurrences,
+    prior: document.getElementById('caStage').value === 'first' ? [] : caPriorCycles
+  };
+}
+function caExpectation(stage) {
+  const base = 'Consistent and punctual attendance is required. Immediate improvement is expected. ';
+  if (stage === 'second') return 'Immediate and sustained improvement in attendance and punctuality is required. Any additional unexcused occurrences may result in further disciplinary action, up to and including termination.';
+  if (stage === 'final') return base + 'This is a final warning. Any further attendance issues will result in termination, in accordance with the Attendance & Punctuality and Progressive Discipline policies.';
+  if (stage === 'termination') return 'Due to continued attendance issues after prior corrective action, employment is terminated in accordance with the Attendance & Punctuality and Progressive Discipline policies.';
+  return base + 'Continued attendance issues may result in additional corrective action, up to and including termination, in accordance with the Attendance & Punctuality and Progressive Discipline policies.';
+}
+function caFormHtml(d) {
+  // One flat 20-column table (no nested tables) so Word / LibreOffice keep the column widths.
+  const box = on => on ? '&#9746;' : '&#9744;';
+  const total = d.occurrences.reduce((a, o) => a + o.pts, 0);
+  const hasLate = d.occurrences.some(o => o.pts < 1);
+  const B = 'border:1px solid #000;padding:4px 7px;vertical-align:top;font-family:Arial,Helvetica,sans-serif;font-size:10pt;';
+  const td = (span, html, extra) => `<td colspan="${span}" width="${span * 36}" style="${B}${extra || ''}">${html}</td>`;
+  const lbl = t => `<div style="font-size:8pt;font-weight:bold;text-transform:uppercase">${t}</div>`;
+  const hd = t => `<tr>${td(20, t, 'background:#d9d9d9;font-size:8pt;font-weight:bold;text-transform:uppercase')}</tr>`;
+  const chk = (on, t) => `<div style="margin:1px 0">${box(on)} ${t}</div>`;
+  const stageRow = Object.entries(CA_STAGES).map(([k, s]) => td(5, `${box(d.stage === k)} ${s.label}`)).join('');
+  const ul = occ => `<ul style="margin:2px 0 2px 18px;padding:0">${occ.map(o => `<li>${fmtUS(o.date)} &ndash; ${escHtml(o.label)} &ndash; ${fmtPts(o.pts)}</li>`).join('')}</ul>`;
+  const list = ul(d.occurrences);
+  const sumPts = occ => occ.reduce((a, o) => a + o.pts, 0);
+  // Later warnings put each earlier warning's occurrences in its own column, current ones in the last.
+  const cols = d.prior.length ? [
+    ...d.prior.map(c => ({ head: `${c.marker} Delivered on ${fmtUS(c.date)}`, occ: c.occurrences })),
+    { head: 'For ' + CA_STAGES[d.stage].marker + ':', occ: d.occurrences }
+  ] : null;
+  let details;
+  if (cols) {
+    const base = Math.floor(20 / cols.length), extra = 20 - base * cols.length;
+    const cells = cols.map((c, i) => {
+      const bd = 'border:none;border-bottom:1px solid #000;' + (i === 0 ? 'border-left:1px solid #000;' : '') + (i === cols.length - 1 ? 'border-right:1px solid #000;' : '');
+      return td(base + (i === 0 ? extra : 0), `<p style="margin:0"><b>${escHtml(c.head)}</b></p>${ul(c.occ)}<p style="margin:0"><b>Total Occurrences: ${fmtPts(sumPts(c.occ))}</b></p>`, bd);
+    }).join('');
+    details = `<tr>${td(20, `<p style="margin:0">${escHtml(d.first)} has failed to meet the Company&rsquo;s attendance, punctuality, and/or timekeeping expectations as outlined in policy. ${escHtml(d.first)} currently has ${fmtPts(total)} occurrences.</p><p style="margin:6px 0 0"><b>Documented Occurrence(s):</b></p>`, 'border-bottom:none;')}</tr>\n<tr>${cells}</tr>`;
+  } else {
+    details = `<tr>${td(20, `<p style="margin:0 0 6px">${escHtml(d.first)} has failed to meet the Company&rsquo;s attendance, punctuality, and/or timekeeping expectations as outlined in policy. ${escHtml(d.first)} currently has ${fmtPts(total)} occurrences.</p><p style="margin:0"><b>Documented Occurrence(s):</b></p>${list}<p style="margin:0"><b>Total Occurrence: ${fmtPts(total)}</b></p>`)}</tr>`;
+  }
+  const noBorder = 'border:none;padding:2px 0;font-family:Arial,Helvetica,sans-serif;';
+  return `<table align="center" width="720" style="width:720px;margin:0 auto;border-collapse:collapse;table-layout:fixed;font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000">
+<colgroup>${'<col width="36" style="width:36px">'.repeat(20)}</colgroup>
+<tr><td colspan="20" width="720" style="${noBorder}text-align:center;font-size:9pt">${escHtml(CA_CONFIG.company)} Corrective Action Form</td></tr>
+<tr><td colspan="20" width="720" style="${noBorder}text-align:center;font-size:16pt;font-weight:bold;padding-bottom:6px">CORRECTIVE ACTION FORM</td></tr>
+<tr>${td(10, lbl('Employee Name') + escHtml(d.first + ' ' + d.last))}${td(10, lbl('Date') + (d.date ? fmtUS(d.date) : ''))}</tr>
+<tr>${td(10, lbl('Employee ID Number') + escHtml(d.empId) + '&nbsp;')}${td(10, lbl('Employee&rsquo;s Job Title') + escHtml(d.title))}</tr>
+<tr>${td(10, lbl('Direct Supervisor&rsquo;s Name') + escHtml(d.supervisor))}${td(10, lbl('Employee&rsquo;s Work Location') + escHtml(d.location))}</tr>
+${hd('Corrective Action To Be Taken (check one)')}
+<tr>${stageRow}</tr>
+${hd('Nature of Incident (check one)')}
+<tr>${td(10, '<div style="font-weight:bold">Unsatisfactory Performance</div>' + chk(false,'Not Meeting Job Role Expectations') + chk(true,'Attendance') + chk(hasLate,'Chronic Tardiness'))}${td(10, '<div style="font-weight:bold">Unsatisfactory Conduct</div>' + chk(false,'Negligent Conduct') + chk(false,'Inappropriate Conduct') + chk(false,'Insubordination') + chk(d.occurrences.some(o => /no call/i.test(o.label)),'No Call/No Show') + chk(true,'Violation of Policy'))}</tr>
+${hd('Incident Details')}
+${details}
+${hd('Future Expectation')}
+<tr>${td(20, escHtml(caExpectation(d.stage)))}</tr>
+<tr>${td(7, lbl('Supervisor&rsquo;s Signature'), 'height:40px')}${td(3, lbl('Date'))}${td(7, lbl('HR Signature'))}${td(3, lbl('Date'))}</tr>
+<tr><td colspan="20" width="720" style="${noBorder}padding-top:8px;font-size:9pt">Your signature below indicates this warning has been reviewed with you, and has received a copy; It does not constitute agreement with this document.</td></tr>
+<tr>${td(14, lbl('Employee Signature'), 'height:40px')}${td(6, lbl('Date'))}</tr>
+<tr><td colspan="20" width="720" style="${noBorder}padding-top:8px;text-align:center;font-size:9pt;font-weight:bold">CONFIDENTIAL</td></tr>
+</table>`;
+}
+// ── Email to HR asking to move forward with the warning ──
+const CA_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function caEmailHtml(d, to) {
+  const ptsWord = n => fmtPts(n) + (n <= 1 ? ' point' : ' points');
+  const P = 'margin:0 0 12px;';
+  const group = occ => {
+    const months = [];
+    occ.forEach(o => { const key = o.date.slice(0, 7); let m = months[months.length - 1]; if (!m || m.key !== key) months.push(m = { key, occ: [] }); m.occ.push(o); });
+    return months.map(m => {
+      const [y, mo] = m.key.split('-');
+      const sum = m.occ.reduce((a, o) => a + o.pts, 0);
+      return `<p style="${P}">${CA_MONTHS[parseInt(mo) - 1]} ${y} | ${ptsWord(sum)}</p><ul style="margin:0 0 12px 0;padding-left:40px">${m.occ.map(o => `<li>${fmtUS(o.date)} | ${escHtml(o.label)} | ${ptsWord(o.pts)}</li>`).join('')}</ul>`;
+    }).join('');
+  };
+  const total = occ => `<p style="${P}">Total Points: ${fmtPts(occ.reduce((a, o) => a + o.pts, 0))}</p>`;
+  const lastPrior = d.prior[d.prior.length - 1];
+  const priorLabel = { '1st': 'First Warning', '2nd': 'Second Warning', 'Final': 'Final Warning' };
+  const ask = d.stage === 'termination' ? 'move forward with Termination' : 'move forward with a ' + CA_STAGES[d.stage].marker + ' Warning';
+  const who = escHtml((d.title || 'Employee') + ', ' + d.first + ' ' + d.last);
+  const sick = d.sickRemaining <= 0 ? ' They have used all their NY Safe and Sick Leave.' : ` They have ${fmtStoHrs(d.sickRemaining)} hours of NY Safe and Sick Leave remaining.`;
+  const intro = lastPrior
+    ? `${who}, has been on a ${priorLabel[lastPrior.marker]} since ${fmtUS(lastPrior.date)} and continued to show a pattern of lateness and absences.${sick} Can we ${ask}. See breakdown.`
+    : `${who}, has reached ${fmtPts(d.occurrences.reduce((a, o) => a + o.pts, 0))} points and has shown a pattern of lateness and absences.${sick} Can we ${ask}. See breakdown.`;
+  let body = '';
+  d.prior.forEach(c => { body += `<p style="${P}">${c.marker} Delivered on ${fmtUS(c.date)}</p>${group(c.occurrences)}${total(c.occurrences)}`; });
+  if (d.prior.length) body += `<p style="${P}">For ${d.stage === 'termination' ? 'Termination' : CA_STAGES[d.stage].marker}</p>`;
+  body += group(d.occurrences) + total(d.occurrences);
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:12px;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#222"><p style="${P}">Hey ${escHtml(to || '')},</p><p style="${P}">${intro}</p>${body}</body></html>`;
+}
+function caSetView(v) {
+  document.getElementById('caPreview').style.display = v === 'form' ? '' : 'none';
+  document.getElementById('caEmailPreview').style.display = v === 'email' ? '' : 'none';
+  document.getElementById('caTabForm').className = 'btn' + (v === 'form' ? ' primary' : '');
+  document.getElementById('caTabEmail').className = 'btn' + (v === 'email' ? ' primary' : '');
+}
+async function caCopyEmail() {
+  if (!caPerson) return;
+  const html = caEmailHtml(caFormData(), document.getElementById('caEmailTo').value.trim());
+  try {
+    const text = new DOMParser().parseFromString(html, 'text/html').body.innerText || '';
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+    toast('Email copied — paste it into your email', 'success');
+  } catch (e) {
+    const f = document.getElementById('caEmailPreview'), doc = f.contentDocument;
+    try { const r = doc.createRange(); r.selectNodeContents(doc.body); const sel = f.contentWindow.getSelection(); sel.removeAllRanges(); sel.addRange(r); doc.execCommand('copy'); toast('Email copied — paste it into your email', 'success'); }
+    catch (e2) { toast('Could not copy — select the email and copy manually', 'error'); }
+  }
+}
+function caDocHtml(d) {
+  return `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="UTF-8"><title>Corrective Action - ${escHtml(d.last + ', ' + d.first)}</title>
+<style>@page{size:8.5in 11in;margin:0.5in}body{margin:0;padding:14px;background:#fff;font-family:Arial,Helvetica,sans-serif;text-align:center}table{text-align:left}@media print{body{padding:0}}</style></head><body>${caFormHtml(d)}</body></html>`;
+}
+function caRefresh() {
+  if (!caPerson) return;
+  const fd = caFormData();
+  document.getElementById('caPreview').srcdoc = caDocHtml(fd);
+  document.getElementById('caEmailPreview').srcdoc = caEmailHtml(fd, document.getElementById('caEmailTo').value.trim());
+  document.getElementById('caRecordBtn').textContent = 'Record ' + CA_STAGES[document.getElementById('caStage').value].marker + ' in tracker';
+}
+function openCA(key) {
+  const p = attendanceData[key]; if (!p) return;
+  const dates = p.dates || {}, nm = splitName(p.displayName || key);
+  caPerson = key;
+  caOccurrences = caGetOccurrences(p);
+  caPriorCycles = caGetPriorCycles(p);
+  const total = caOccurrences.reduce((a, o) => a + o.pts, 0);
+  document.getElementById('caSubtitle').textContent = nm.fn + ' ' + nm.ln + ' — ' + fmtPts(total) + ' points';
+  document.getElementById('caStage').value = caNextStage(dates);
+  document.getElementById('caDate').value = todayYMD();
+  const id = findEmployeeId(nm.fn, nm.ln) || caRowId(p) || findRowEmployeeId(nm.fn, nm.ln);
+  document.getElementById('caEmpId').value = id;
+  document.getElementById('caEmpId').placeholder = Object.keys(employees).length ? 'Not found in employee list' : 'Import employee ID list first';
+  document.getElementById('caTitle').value = caTitleFor(nm.fn);
+  document.getElementById('caSupervisor').value = CA_CONFIG.supervisor;
+  document.getElementById('caLocation').value = CA_CONFIG.location;
+  document.getElementById('caEmailTo').value = CA_CONFIG.emailTo;
+  caSetView('form');
+  document.getElementById('caModal').classList.add('active');
+  caRefresh();
+}
+function closeCA() { document.getElementById('caModal').classList.remove('active'); caPerson = null; }
+function caFileBase() { const d = caFormData(); return `${d.last}, ${d.first[0] || ''}. ${CA_STAGES[d.stage].label} - Attendance`; }
+function caDownload() {
+  if (!caPerson) return;
+  const d = caFormData();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿', caDocHtml(d)], { type: 'application/msword' }));
+  a.download = caFileBase() + '.doc'; a.click();
+  toast('Downloaded', 'success');
+}
+function caPrint() {
+  const f = document.getElementById('caPreview');
+  if (f.contentWindow) { f.contentWindow.focus(); f.contentWindow.print(); }
+}
+function caRecord() {
+  if (!caPerson) return;
+  const d = caFormData(), p = attendanceData[caPerson], marker = CA_STAGES[d.stage].marker;
+  if (!d.date) { toast('Pick a date first', 'error'); return; }
+  const dates = p.dates || (p.dates = {});
+  if (Object.keys(dates).some(k => k > d.date && getPoints(dates[k]))) { toast('Form date must be on or after their last occurrence', 'error'); return; }
+  if (dates[d.date] && String(dates[d.date]).trim() !== marker) { toast('That date already has an entry (' + dates[d.date] + ') — pick an empty date', 'error'); return; }
+  dates[d.date] = marker;
+  const name = splitName(p.displayName || caPerson).fn;
+  saveData(); rebuildDates(); renderTable(); closeCA();
+  toast(marker + ' recorded for ' + name, 'success');
+}
+// ───────────────────────────────────────────────────────────────
 function toast(msg,type) {
   const t=document.getElementById('toast');
   t.textContent=msg; t.className='toast '+(type||'')+' show';
