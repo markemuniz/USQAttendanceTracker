@@ -64,6 +64,8 @@
   .btn.primary:hover{background:var(--accent-dim)}
   .btn.danger{color:var(--red);border-color:rgba(255,107,122,0.25)}
   .btn.danger:hover{background:rgba(255,107,122,0.08)}
+  .btn:disabled{opacity:0.4;cursor:not-allowed}
+  .btn:disabled:hover{background:var(--surface2);border-color:var(--border)}
   .dropdown{position:relative;display:inline-block}
   .dropdown-btn{padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.75rem;font-weight:500;cursor:pointer;transition:all 0.15s;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
   .dropdown-btn:hover{background:var(--surface3);border-color:var(--border-light)}
@@ -236,6 +238,7 @@
       <button class="btn" onclick="openImport()">&#8593; Import</button>
       <button class="btn" onclick="openImportHistory()">&#128339; History<span class="log-count" id="importLogCount" style="display:none"></span></button>
       <button class="btn" onclick="exportCSV()">&#8595; Export</button>
+      <button class="btn" id="undoBtn" onclick="undoLast()" disabled title="Undo last change (Ctrl/Cmd+Z)">&#8630; Undo</button>
       <button class="btn danger" onclick="confirmClear()">Clear</button>
       <button class="btn" onclick="handleLock()">&#128274; Lock</button>
     </div>
@@ -448,6 +451,7 @@ async function handleLogin() {
   }
 }
 function handleLock() {
+  undoStack = []; updateUndoBtn();
   auth.signOut().then(() => {
     document.getElementById('loginView').style.display = 'flex';
     document.getElementById('appView').style.display = 'none';
@@ -487,6 +491,7 @@ let initialLoad = true;
 function loadData() {
   dataRef.on('value', snap => {
     attendanceData = snap.val() || {};
+    committedState = JSON.stringify(attendanceData);
     localStorage.setItem('bt_attendance_usq', JSON.stringify(attendanceData));
     rebuildDates(); renderTable();
     if (initialLoad) {
@@ -503,7 +508,40 @@ function loadData() {
     }
   });
 }
+// ── Undo ──
+// committedState = last saved/synced data. Every saveData() pushes it onto the stack first.
+const UNDO_LIMIT = 25;
+let undoStack = [];
+let committedState = '{}';
+function updateUndoBtn() {
+  const b = document.getElementById('undoBtn');
+  if (!b) return;
+  b.disabled = !undoStack.length;
+  b.textContent = '\u21B6 Undo' + (undoStack.length ? ' (' + undoStack.length + ')' : '');
+}
+function undoLast() {
+  if (!undoStack.length) { toast('Nothing to undo', 'error'); return; }
+  attendanceData = JSON.parse(undoStack.pop());
+  committedState = JSON.stringify(attendanceData);
+  dataRef.set(attendanceData).catch(err => toast('Undo failed: ' + err.message, 'error'));
+  localStorage.setItem('bt_attendance_usq', committedState);
+  rebuildDates(); renderTable(); updateUndoBtn();
+  toast('Last change undone', 'success');
+}
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (document.querySelector('.modal-overlay.active')) return;
+    if (document.getElementById('undoBtn').offsetParent === null) return;
+    e.preventDefault(); undoLast();
+  }
+});
 function saveData() {
+  undoStack.push(committedState);
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  committedState = JSON.stringify(attendanceData);
+  updateUndoBtn();
   dataRef.set(attendanceData).catch(err => toast('Save failed: ' + err.message, 'error'));
   localStorage.setItem('bt_attendance_usq', JSON.stringify(attendanceData));
 }
@@ -1123,7 +1161,7 @@ function exportCSV() {
   toast('CSV exported','success');
 }
 function confirmClear() {
-  if (!confirm('Clear ALL attendance data? Cannot be undone.')) return;
+  if (!confirm('Clear ALL attendance data? (You can Undo right after, but only in this browser session.)')) return;
   if (!confirm('Are you sure?')) return;
   attendanceData={}; saveData(); rebuildDates(); renderTable(); toast('All data cleared','success');
 }
