@@ -171,6 +171,14 @@
   .toast.show{opacity:1;transform:translateY(0)}
   .toast.error{border-color:rgba(255,107,122,0.4)}
   .toast.success{border-color:rgba(74,222,128,0.4)}
+  /* Edit tracking */
+  .edit-meta{margin-top:14px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:0.72rem;color:var(--text-muted);line-height:1.6}
+  .edit-meta b{color:var(--accent);font-weight:600}
+  .edit-meta .em-row{display:flex;gap:6px;flex-wrap:wrap}
+  .edit-meta .em-hist{margin-top:4px;padding-top:4px;border-top:1px solid var(--border)}
+  .changelog-filter{width:100%;padding:8px 12px;margin-bottom:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.8rem;outline:none}
+  #changeLogEntries{max-height:60vh;overflow-y:auto}
+  #changeLogEntries .import-log-entry{white-space:normal;flex-wrap:wrap}
   /* Import log footer */
   #importLogEntries{display:flex;flex-direction:column;gap:2px;max-height:60vh;overflow-y:auto}
   .import-log-empty{font-size:0.8rem;color:var(--text-muted);text-align:center;padding:20px 0}
@@ -253,6 +261,7 @@
       <button class="btn" id="hideBtn" onclick="toggleShowHidden()">Show Hidden</button>
       <button class="btn" onclick="openImport()">&#8593; Import</button>
       <button class="btn" onclick="openImportHistory()">&#128339; History<span class="log-count" id="importLogCount" style="display:none"></span></button>
+      <button class="btn" onclick="openChangeLog()">&#9998; Change Log</button>
       <button class="btn" onclick="exportCSV()">&#8595; Export</button>
       <button class="btn" id="undoBtn" onclick="undoLast()" disabled title="Undo last change (Ctrl/Cmd+Z)">&#8630; Undo</button>
       <button class="btn danger" onclick="confirmClear()">Clear</button>
@@ -310,6 +319,7 @@
       </div>
       <textarea id="userNoteInput" class="note-input" placeholder="Add a note about this day (optional)"></textarea>
     </div>
+    <div id="editMeta" class="edit-meta" style="display:none"></div>
     <div class="modal-actions" style="justify-content:space-between">
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="toggleHidePerson()" id="hidePersonBtn" style="font-size:0.72rem">Hide Budtender</button>
@@ -379,6 +389,18 @@
     <div id="importLogEntries"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeImportHistory()">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="changeLogModal" onclick="if(event.target===this)closeChangeLog()">
+  <div class="modal" style="width:620px">
+    <h3>Change Log</h3>
+    <p class="subtitle">Every manual edit to an entry or note, newest first</p>
+    <input type="text" id="changeLogFilter" class="changelog-filter" placeholder="Filter by budtender or editor" oninput="renderChangeLog()">
+    <div id="changeLogEntries"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeChangeLog()">Close</button>
     </div>
   </div>
 </div>
@@ -1160,7 +1182,7 @@ function renderTable() {
     if (periodInfo) {
       cells=filteredPeriods.map(p=>{ const pts=getPeriodPoints(dates,p,periodInfo.keyFn); const display=pts===0?'<span style="color:var(--text-muted)">&#183;</span>':(pts%1===0?pts:pts.toFixed(1)); return `<td class="period-cell ${pts>0?ptsColor(pts):''}">${display}</td>`; }).join('');
     } else {
-      cells=filteredDates.map(d=>{ const v=dates[d]||''; const hasUserNote=!!(userNotes[d]&&userNotes[d].trim()); const starHtml=hasUserNote?'<span class="note-star">&#9733;</span>':''; const titleAttr=hasUserNote?` title="${(userNotes[d]||'').replace(/"/g,'&quot;')}"`:'' ; return `<td class="date-cell" onclick="openEdit('${key.replace(/'/g,"\\'")}','${d}')"${titleAttr}>${cellHtml(v)}${starHtml}</td>`; }).join('');
+      cells=filteredDates.map(d=>{ const v=dates[d]||''; const hasUserNote=!!(userNotes[d]&&userNotes[d].trim()); const starHtml=hasUserNote?'<span class="note-star">&#9733;</span>':''; const lastEd=getCellEdits(person,d)[0]; const tip=[hasUserNote?userNotes[d]:'', lastEd?('Edited by '+lastEd.who+' \u00b7 '+fmtEditTs(lastEd.ts)):''].filter(Boolean).join('\n'); const titleAttr=tip?` title="${tip.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"`:'' ; return `<td class="date-cell" onclick="openEdit('${key.replace(/'/g,"\\'")}','${d}')"${titleAttr}>${cellHtml(v)}${starHtml}</td>`; }).join('');
     }
     return `<tr><td class="${stoColorClass(stoRem)}" title="${getStoUsedMins(dates)>0?fmtMins(getStoUsedMins(dates))+' used of '+STO_ANNUAL_HOURS+':00':'No PS&STO used'}">${fmtStoHrs(stoRem)}</td><td><span class="name-badge ${nc}">${fn}</span></td><td><span class="name-badge ${nc}">${ln}</span>${wuTag}${caFolder}</td><td class="${ptsColor(mainPts)}">${mainPts>0?mainPts%1===0?mainPts:mainPts.toFixed(1):'0'}</td><td class="${ptsColor(wp)}">${wp>0?wp%1===0?wp:wp.toFixed(1):'0'}</td>${cells}</tr>`;
   }).join('');
@@ -1170,6 +1192,74 @@ function fmtDateLong(d) {
   try { const dt=new Date(d+'T00:00:00'); return (dt.getMonth()+1).toString().padStart(2,'0')+'/'+dt.getDate().toString().padStart(2,'0')+'/'+dt.getFullYear(); }
   catch(e) { return d; }
 }
+// ── Edit tracking: who changed what, stored per cell in person.edits[date] ──
+const EDIT_HISTORY_LIMIT = 10;
+function editorName() { return (currentUserEmail || '').split('@')[0] || 'unknown'; }
+function fmtEditTs(ts) {
+  const d = new Date(ts);
+  return (d.getMonth()+1)+'/'+d.getDate()+'/'+String(d.getFullYear()).slice(2)+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+}
+function getCellEdits(p, dt) {
+  const e = p && p.edits && p.edits[dt];
+  if (!e) return [];
+  return (Array.isArray(e) ? e : Object.values(e)).filter(Boolean).sort((a,b)=>b.ts-a.ts);
+}
+function describeEdit(e) {
+  const parts = [];
+  if (e.from !== e.to) {
+    const f = e.from ? escHtml(e.from) : '<i>blank</i>', t = e.to ? escHtml(e.to) : '<i>blank</i>';
+    parts.push(f + ' &rarr; ' + t);
+  }
+  if (e.noteChanged) parts.push(e.noteTo ? 'note: "' + escHtml(e.noteTo) + '"' : 'note removed');
+  return parts.join(' &#183; ') || 'saved';
+}
+function recordEdit(pk, dt, from, to, noteFrom, noteTo) {
+  if (from === to && noteFrom === noteTo) return;
+  const p = attendanceData[pk];
+  if (!p.edits) p.edits = {};
+  const list = getCellEdits(p, dt);
+  const entry = { who: editorName(), ts: Date.now(), from: from || '', to: to || '' };
+  if (noteFrom !== noteTo) { entry.noteChanged = true; entry.noteTo = noteTo || ''; }
+  list.unshift(entry);
+  p.edits[dt] = list.slice(0, EDIT_HISTORY_LIMIT);
+}
+function renderEditMeta(p, dt) {
+  const el = document.getElementById('editMeta');
+  const list = getCellEdits(p, dt);
+  if (!list.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const last = list[0];
+  let html = `<div class="em-row">Last edited by <b>${escHtml(last.who)}</b> &#183; ${fmtEditTs(last.ts)}</div><div>${describeEdit(last)}</div>`;
+  if (list.length > 1) {
+    html += '<div class="em-hist">' + list.slice(1).map(e => `<div><b>${escHtml(e.who)}</b> &#183; ${fmtEditTs(e.ts)} &#183; ${describeEdit(e)}</div>`).join('') + '</div>';
+  }
+  el.innerHTML = html; el.style.display = 'block';
+}
+function collectChangeLog() {
+  const rows = [];
+  for (const [pk, p] of Object.entries(attendanceData)) {
+    if (!p || !p.edits) continue;
+    for (const dt of Object.keys(p.edits)) {
+      for (const e of getCellEdits(p, dt)) rows.push({ ...e, pk, dt, name: p.displayName || pk });
+    }
+  }
+  return rows.sort((a,b)=>b.ts-a.ts);
+}
+function renderChangeLog() {
+  const q = (document.getElementById('changeLogFilter').value || '').trim().toLowerCase();
+  const rows = collectChangeLog().filter(r => !q || r.name.toLowerCase().includes(q) || (r.who||'').toLowerCase().includes(q));
+  const el = document.getElementById('changeLogEntries');
+  if (!rows.length) { el.innerHTML = '<div class="import-log-empty">No tracked edits yet. Edits are recorded from now on.</div>'; return; }
+  el.innerHTML = rows.map(r => `<div class="import-log-entry" style="cursor:pointer" onclick="closeChangeLog();openEdit('${r.pk.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}','${r.dt}')">
+      <span class="log-who">${escHtml(r.who)}</span><span class="log-sep">&#183;</span>
+      <span style="color:var(--text)">${escHtml(r.name)}</span><span class="log-sep">&#183;</span>
+      <span>${fmtDate(r.dt)}</span><span class="log-sep">&#183;</span>
+      <span style="color:var(--text-dim)">${describeEdit(r)}</span>
+      <span style="margin-left:auto">${fmtEditTs(r.ts)}</span>
+    </div>`).join('');
+}
+function openChangeLog() { document.getElementById('changeLogFilter').value=''; renderChangeLog(); document.getElementById('changeLogModal').classList.add('active'); }
+function closeChangeLog() { document.getElementById('changeLogModal').classList.remove('active'); }
+// ─────────────────────────────────────────────────────────────────────────────
 function openEdit(pk,dt) {
   editingPerson=pk; editingDate=dt;
   const p=attendanceData[pk], name=p?(p.displayName||pk):pk;
@@ -1181,6 +1271,7 @@ function openEdit(pk,dt) {
   if (note) { noteEl.textContent=note; noteEl.style.display='block'; } else { noteEl.style.display='none'; }
   document.getElementById('userNoteInput').value=(p&&p.userNotes&&p.userNotes[dt])?p.userNotes[dt]:'';
   document.getElementById('hidePersonBtn').textContent=(p&&p.hidden)?'Unhide Budtender':'Hide Budtender';
+  renderEditMeta(p, dt);
   document.getElementById('editModal').classList.add('active');
   setTimeout(()=>input.focus(),100);
 }
@@ -1194,6 +1285,9 @@ function saveEdit() {
   if (!attendanceData[editingPerson]) attendanceData[editingPerson]={displayName:editingPerson,dates:{}};
   if (!attendanceData[editingPerson].dates) attendanceData[editingPerson].dates={};
   if (!attendanceData[editingPerson].userNotes) attendanceData[editingPerson].userNotes={};
+  const prevVal=(attendanceData[editingPerson].dates[editingDate]||'').toString().trim();
+  const prevNote=(attendanceData[editingPerson].userNotes[editingDate]||'').toString().trim();
+  recordEdit(editingPerson, editingDate, prevVal, val, prevNote, userNote);
   if (val) attendanceData[editingPerson].dates[editingDate]=val; else delete attendanceData[editingPerson].dates[editingDate];
   if (userNote) attendanceData[editingPerson].userNotes[editingDate]=userNote; else delete attendanceData[editingPerson].userNotes[editingDate];
   saveData(); rebuildDates(); renderTable(); closeEdit();
